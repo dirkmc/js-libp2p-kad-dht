@@ -23,6 +23,7 @@ const Providers = require('./providers')
 const Message = require('./message')
 const RandomWalk = require('./random-walk')
 const QueryManager = require('./query-manager')
+const SimServer = require('./sim-server')
 const assert = require('assert')
 const mergeOptions = require('merge-options')
 
@@ -142,6 +143,8 @@ class KadDHT extends EventEmitter {
      * @type {QueryManager}
      */
     this._queryManager = new QueryManager()
+
+    this._simServer = new SimServer(this)
   }
 
   /**
@@ -171,6 +174,8 @@ class KadDHT extends EventEmitter {
       this.randomWalkEnabled && this.randomWalk.start(this.randomWalkQueriesPerPeriod, this.randomWalkInterval, this.randomWalkTimeout)
       callback()
     })
+
+    this._simServer.start()
   }
 
   /**
@@ -375,7 +380,7 @@ class KadDHT extends EventEmitter {
                 cb(null, res)
               })
             }
-          })
+          }, 'GetMany')
 
           // run our query
           timeout((_cb) => {
@@ -439,7 +444,7 @@ class KadDHT extends EventEmitter {
             }
           ], callback)
         }
-      })
+      }, 'getClosestPeers')
 
       q.run(tablePeers, (err, res) => {
         if (err) {
@@ -661,7 +666,7 @@ class KadDHT extends EventEmitter {
                 }
               ], cb)
             }
-          })
+          }, 'FindPeer')
 
           timeout((_cb) => {
             query.run(peers, _cb)

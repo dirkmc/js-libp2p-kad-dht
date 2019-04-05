@@ -520,7 +520,7 @@ module.exports = (dht) => ({
             }
           ], cb)
         }
-      })
+      }, 'FindProviders')
 
       const peers = dht.routingTable.closestPeers(key.buffer, c.ALPHA)
 

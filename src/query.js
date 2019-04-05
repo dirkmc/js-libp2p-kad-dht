@@ -38,10 +38,11 @@ class Query {
    * @param {Buffer} key
    * @param {makePath} makePath - Called to set up each disjoint path. Must return the query function.
    */
-  constructor (dht, key, makePath) {
+  constructor (dht, key, makePath, name) {
     this.dht = dht
     this.key = key
     this.makePath = makePath
+    this.name = name
     this.concurrency = c.ALPHA
     this._log = utils.logger(this.dht.peerInfo.id, 'query:' + mh.toB58String(key))
   }
@@ -82,6 +83,7 @@ class Query {
     })
     run.paths = pathPeers.map((peers, i) => {
       return {
+        id: require('uuid')(),
         peers,
         run,
         query: this.makePath(i, numPaths),
@@ -91,9 +93,10 @@ class Query {
 
     // Register this query so we stop it if the DHT stops
     this.dht._queryManager.queryStarted(this)
+    this.dht.emit('run', this)
 
     // Create a manager to keep track of the worker queue for each path
-    this.workerManager = new WorkerManager()
+    this.workerManager = new WorkerManager(this.dht)
     each(run.paths, (path, cb) => {
       waterfall([
         (cb) => PeerQueue.fromKey(this.key, cb),
@@ -141,6 +144,7 @@ class Query {
   stop () {
     this.workerManager && this.workerManager.stop()
     this.dht._queryManager.queryCompleted(this)
+    this.dht.emit('run complete', this)
   }
 }
 
@@ -151,7 +155,8 @@ class WorkerManager {
   /**
    * Creates a new WorkerManager
    */
-  constructor () {
+  constructor (dht) {
+    this.dht = dht
     this.running = true
     this.workers = []
   }
@@ -176,9 +181,15 @@ class WorkerManager {
    */
   workerQueue (query, path, callback) {
     let workerRunning = true
+    const running = new Set()
+
     const q = queue((next, cb) => {
       query._log('queue:work')
+
+      running.add(next)
       this.execQuery(next, query, path, (err, state) => {
+        running.delete(next)
+
         // Ignore response after worker killed
         if (!workerRunning || !this.running) {
           return cb()
@@ -216,6 +227,7 @@ class WorkerManager {
           q.kill()
           workerRunning = false
           callback(err)
+          this.dht.emit('queue complete', { query, path, queue: q })
         }
       }
     }
@@ -248,9 +260,14 @@ class WorkerManager {
     q.unsaturated = () => {
       query._log('queue:unsaturated')
       fill()
+      setTimeout(() => {
+        this.dht.emit('queue update', { query, path, queue: q, running: [...running], pending: path.peersToQuery.length })
+      })
     }
 
     q.buffer = 0
+
+    this.dht.emit('queue', { query, path, queue: q, running: [...running], pending: path.peersToQuery.length })
   }
 
   /**
@@ -264,7 +281,10 @@ class WorkerManager {
    * @private
    */
   execQuery (next, query, path, callback) {
+    this.dht.emit('query', { peerId: next, pathId: path.id })
     path.query(next, (err, res) => {
+      this.dht.emit('query complete', { peerId: next, pathId: path.id })
+
       // If the run has completed, bail out
       if (!this.running) {
         return callback()
